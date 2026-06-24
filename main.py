@@ -1,40 +1,41 @@
 import os
-import requests
-from flask import Flask, request
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from groq import Groq
 
-app = Flask(__name__)
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+PORT = int(os.environ.get('PORT', 8080))
+RAILWAY_URL = os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'telegram-bot-production-7147.up.railway.app')
 
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
+client = Groq(api_key=GROQ_API_KEY)
 
-def ask_groq(prompt):
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": "llama3-8b-8192",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.7
-    }
-    response = requests.post(url, headers=headers, json=data)
-    return response.json()['choices'][0]['message']['content']
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text('හායි මචන්! මම Groq AI Bot. මොනවද දැනගන්න ඕන?')
 
-@app.route(f'/{TELEGRAM_TOKEN}', methods=['POST'])
-def telegram_webhook():
-    update = request.get_json()
-    if 'message' in update:
-        chat_id = update['message']['chat']['id']
-        text = update['message']['text']
-        reply = ask_groq(text)
-        requests.post(f'https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage',
-                      json={'chat_id': chat_id, 'text': reply})
-    return 'ok'
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_message = update.message.text
+    try:
+        chat_completion = client.chat.completions.create(
+            messages=[{"role": "user", "content": user_message}],
+            model="llama-3.1-8b-instant",
+        )
+        ai_response = chat_completion.choices[0].message.content
+        await update.message.reply_text(ai_response)
+    except Exception as e:
+        await update.message.reply_text(f'Error: {str(e)}')
 
-@app.route('/')
-def home():
-    return 'Bot is running!'
+def main():
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TELEGRAM_TOKEN,
+        webhook_url=f"https://{RAILWAY_URL}/{TELEGRAM_TOKEN}"
+    )
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    main()
