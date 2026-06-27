@@ -16,12 +16,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
+
         chat_completion = client.chat.completions.create(
             messages=[{"role": "user", "content": user_message}],
             model="llama-3.1-8b-instant",
         )
         ai_response = chat_completion.choices[0].message.content
-        await update.message.reply_text(ai_response)
+
+        # Fix 2.0 - Telegram 4096 limit Safe Split
+        max_length = 4000 # 4096 නෙවෙයි 4000 දාන්නේ Emoji/Special chars නිසා
+        if len(ai_response) <= max_length:
+            await update.message.reply_text(ai_response, parse_mode=None)
+        else:
+            for i in range(0, len(ai_response), max_length):
+                chunk = ai_response[i:i + max_length]
+                await update.message.reply_text(chunk, parse_mode=None)
+
     except Exception as e:
         await update.message.reply_text(f'Error: {str(e)}')
 
@@ -29,7 +40,7 @@ def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
+
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
